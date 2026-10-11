@@ -1,5 +1,5 @@
 # Builds wxl-maxzoom.dll against wxl-core's build shell and publishes it as a GitHub Release on every
-# push to main/master. wxl-core is checked out fresh each run (branch v1.1) and this module's own
+# push to master. wxl-core is checked out fresh each run (branch v1.1) and this module's own
 # source is copied into its extensions/wxl-maxzoom/ folder, where wxl-core's root CMakeLists.txt
 # auto-discovers it as a build target -- no CMakeLists.txt of our own needed. The release tag tracks
 # wxl.json's version field, so pushing without bumping it updates the existing release in place.
@@ -7,7 +7,7 @@ name: Build and Release
 
 on:
   push:
-    branches: [main, master]
+    branches: [master]
 
 permissions:
   contents: write   # needed to publish a Release
