@@ -44,7 +44,9 @@
 //    the horizon -- nothing in the world reaches them, so distance fog never blends in.
 //
 // Everything is re-asserted on every world enter (the client reloads state across loading screens),
-// and all of it is adjustable live from the WarcraftXL overlay (F9).
+// and all of it is adjustable live from the WarcraftXL overlay (F9). The world-enter re-assert only
+// raises the limit; it leaves the camera where it is, so arriving through a hearthstone or portal does
+// not throw the camera out to the maximum. Only the overlay slider and button move it.
 
 #include "wxl/EventScript.hpp"   // wxl::ext::EventScript + the shared wxl::events::Event enum
 #include "game/Script.hpp"        // pulls in the verified wxl::offsets::engine::lua landmarks
@@ -173,21 +175,22 @@ namespace wxl_maxzoom
         float* ViewDistance() { return &viewDistance_; }
         int*   FogDisabled()  { return &fogDisabled_; }
 
-        /// Lift the hard camera ceiling, raise the max-distance CVar, and immediately pull the camera
-        /// out to that new maximum. The engine also snaps the camera IN when the factor drops below the
-        /// current distance, so the slider drives the camera both ways on the spot. The move/smooth
-        /// speed CVars are cranked so that motion is near-instant instead of a slow glide.
+        /// Lift the hard camera ceiling, raise the max-distance CVar, and (with pullOut) immediately pull
+        /// the camera out to that new maximum. The engine also snaps the camera IN when the factor drops
+        /// below the current distance, so the slider drives the camera both ways on the spot. The
+        /// move/smooth speed CVars are cranked so that motion is near-instant instead of a slow glide.
         /// CameraZoomOut clamps to the max, so the margin just guarantees we hit it.
-        void ApplyZoom()
+        void ApplyZoom(bool pullOut = true)
         {
             LiftCameraClamp();
             char lua[256];
-            std::snprintf(lua, sizeof(lua),
+            const int used = std::snprintf(lua, sizeof(lua),
                           "SetCVar(\"cameraDistanceMoveSpeed\", \"50\");"
                           "SetCVar(\"cameraDistanceSmoothSpeed\", \"50\");"
-                          "SetCVar(\"cameraDistanceMaxFactor\", \"%.2f\");"
-                          "CameraZoomOut(%.0f)",
-                          factor_, factor_ * 15.0f + 10.0f);
+                          "SetCVar(\"cameraDistanceMaxFactor\", \"%.2f\")",
+                          factor_);
+            if (pullOut && used > 0 && used < static_cast<int>(sizeof(lua)))
+                std::snprintf(lua + used, sizeof(lua) - used, ";CameraZoomOut(%.0f)", factor_ * 15.0f + 10.0f);
             RunLua(lua);
         }
 
@@ -205,7 +208,8 @@ namespace wxl_maxzoom
         /// Publish the toggle to the per-frame fog detour. Cheap; safe anywhere.
         void ApplyFog() { g_fogDisabled = (fogDisabled_ != 0); }
 
-        void ApplyAll() { ApplyZoom(); ApplyViewDistance(); ApplyFog(); }
+        /// World enter: restore the limits the loading screen reset, without moving the camera.
+        void ApplyAll() { ApplyZoom(false); ApplyViewDistance(); ApplyFog(); }
 
     private:
         void OnWorldEnter(const wxl::events::WorldEnterArgs&) { ApplyAll(); }
