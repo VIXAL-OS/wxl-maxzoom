@@ -65,7 +65,10 @@ namespace wxl_maxzoom
     // The FrameScript entry points, taken by value from the SDK's verified landmark table (reaching
     // them via game/Script.hpp keeps this file clear of any direct offsets/ include).
     namespace lua = wxl::offsets::engine::lua;
-    using ExecFn = void(__cdecl*)(const char* source, void* state);
+    // FrameScript_Execute(source, chunkName, taintSource): the client uses its own Lua state, which is not an
+    // argument (wxl-core's game/Lua.hpp). Passing the state here made it the chunk name, and the taint source
+    // whatever was left on the stack.
+    using ExecFn = void(__cdecl*)(const char* source, const char* chunkName, void* taintSource);
     using CtxFn  = void*(__cdecl*)();
 
     // The hard camera-distance ceiling. A float in the client's .rdata that the engine clamps the
@@ -152,7 +155,7 @@ namespace wxl_maxzoom
         auto execute    = reinterpret_cast<ExecFn>(lua::kFrameScriptExecute);
         void* ctx = getContext();
         if (ctx)
-            execute(source, ctx);
+            execute(source, "wxl-maxzoom", nullptr); // no taint source: the client's own code, not an addon's
     }
 
     class MaxZoom final : public wxl::ext::EventScript
