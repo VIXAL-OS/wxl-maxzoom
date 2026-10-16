@@ -160,6 +160,26 @@ namespace wxl_maxzoom
             execute(source, "wxl-maxzoom", nullptr); // no taint source: the client's own code, not an addon's
     }
 
+    // Blizzard's camera panel (FrameXML InterfaceOptionsPanels) ties its "Max Camera Distance" slider, range 1-2, to
+    // cameraDistanceMaxFactor and writes every change of the slider straight to the CVar. It sets that range and
+    // refreshes on the first PLAYER_ENTERING_WORLD after a login or /reload, and whenever Interface Options opens: the
+    // slider clamps the factor to 2 and writes 2 back, so the zoom stops at ~30 yd until the next loading screen.
+    // The guard widens that slider to our range and, once a second, puts the factor back if anything lowered it.
+    // It runs from OnUpdate, not only from world enter: a /reload never reaches world enter, and at login world enter
+    // runs before the game UI exists. It does nothing while the guard is up and the factor matches, and nothing on
+    // the login and character screens (the glue UI has no UIParent, and the camera CVars don't exist there yet).
+    // Lua globals: WXL_MaxZoomFactor (the factor to keep) and the frame WXL_MaxZoomGuard (one per UI load).
+    static const char kGuardLua[] =
+        "if not UIParent then return end "
+        "if WXL_MaxZoomGuard and WXL_MaxZoomFactor==%.2f then return end "
+        "WXL_MaxZoomFactor=%.2f "
+        "local s=InterfaceOptionsCameraPanelMaxDistanceSlider if s then s:SetMinMaxValues(%.0f,%.0f) end "
+        "if not WXL_MaxZoomGuard then local f=CreateFrame('Frame','WXL_MaxZoomGuard') local t=0 "
+        "f:SetScript('OnUpdate',function(_,e) t=t+e if t<1 then return end t=0 "
+        "local w=WXL_MaxZoomFactor local c=tonumber(GetCVar('cameraDistanceMaxFactor')) or 0 "
+        "if w and c<w-0.01 then local s=InterfaceOptionsCameraPanelMaxDistanceSlider "
+        "if s then s:SetMinMaxValues(%.0f,%.0f) end SetCVar('cameraDistanceMaxFactor',w) end end) end";
+
     class MaxZoom final : public wxl::ext::EventScript
     {
     public:
@@ -169,6 +189,7 @@ namespace wxl_maxzoom
             // CVars across loading screens, so a single apply would not stick. (Fog rides a per-frame
             // hook instead, so it needs no re-assert.)
             on<&MaxZoom::OnWorldEnter>(wxl::events::Event::OnWorldEnter);
+            on<&MaxZoom::OnUpdate>(wxl::events::Event::OnUpdate);
         }
 
         float* Factor()       { return &factor_; }
@@ -192,6 +213,17 @@ namespace wxl_maxzoom
             if (pullOut && used > 0 && used < static_cast<int>(sizeof(lua)))
                 std::snprintf(lua + used, sizeof(lua) - used, ";CameraZoomOut(%.0f)", factor_ * 15.0f + 10.0f);
             RunLua(lua);
+            EnsureGuard();
+        }
+
+        /// The guard chunk: a no-op while the guard is up and holds this factor; otherwise it sets both up.
+        void EnsureGuard()
+        {
+            char guard[1024];
+            const int used = std::snprintf(guard, sizeof(guard), kGuardLua, factor_, factor_, kSliderMin, kSliderMax,
+                                           kSliderMin, kSliderMax);
+            if (used > 0 && used < static_cast<int>(sizeof(guard)))
+                RunLua(guard);
         }
 
         /// Lift the farclip cap, unlock the override, and set the render far plane from the slider.
@@ -213,6 +245,19 @@ namespace wxl_maxzoom
 
     private:
         void OnWorldEnter(const wxl::events::WorldEnterArgs&) { ApplyAll(); }
+
+        // Once a second, whatever the client is doing: a /reload or a login brings a new UI without a guard.
+        void OnUpdate(const wxl::events::UpdateArgs& args)
+        {
+            constexpr float kGuardCheckSeconds = 1.0f;
+            sinceGuardCheck_ += args.dt > 0.0f && args.dt < 10.0f ? args.dt : 0.0f;
+            if (sinceGuardCheck_ < kGuardCheckSeconds)
+                return;
+            sinceGuardCheck_ = 0.0f;
+            EnsureGuard();
+        }
+
+        float sinceGuardCheck_ = 0.0f;
 
         float factor_       = kDefaultFactor;
         float viewDistance_ = kDefaultViewDist;
